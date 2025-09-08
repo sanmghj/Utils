@@ -6,6 +6,7 @@ from pathlib import Path
 
 # 전역 변수
 OUTPUT_FOLDER = "parsed_wav_repo"
+LABEL_OUTPUT_FOLDER = "parsed_label_repo"
 REQUIRED_SCORE_COLUMNS = ['문자점수', '단어점수']
 FILE_COLUMN_NAME = '파일명'
 SCORE_THRESHOLD = 70
@@ -141,15 +142,81 @@ def copy_wav_files(filename_list):
     print(f"\n총 {copied_count}개 파일이 '{OUTPUT_FOLDER}' 폴더로 복사되었습니다.")
     return copied_count
 
+def copy_label_files(filename_list, label_source_path):
+    """
+    WAV 파일명 리스트에 대응하는 라벨 JSON 파일들을 LABEL_OUTPUT_FOLDER로 복사
+
+    Args:
+        filename_list (list): WAV 파일 경로들이 담긴 리스트
+        label_source_path (str): 라벨 파일들이 있는 소스 경로
+
+    Returns:
+        int: 복사된 파일 수
+    """
+    if not filename_list:
+        print("복사할 라벨 파일이 없습니다.")
+        return 0
+
+    # 라벨 소스 경로 확인
+    label_source = Path(label_source_path)
+    if not label_source.exists():
+        print(f"오류: 라벨 소스 경로가 존재하지 않습니다: {label_source_path}")
+        return 0
+
+    # 라벨 출력 폴더 생성 (없을 때만)
+    label_output_path = Path(LABEL_OUTPUT_FOLDER)
+    if not label_output_path.exists():
+        label_output_path.mkdir(exist_ok=True)
+        print(f"라벨 출력 폴더 생성: {label_output_path.absolute()}")
+    else:
+        print(f"기존 라벨 출력 폴더 사용: {label_output_path.absolute()}")
+
+    copied_count = 0
+
+    for wav_path in filename_list:
+        try:
+            wav_file = Path(wav_path)
+            wav_filename = wav_file.stem  # 확장자 제거한 파일명
+
+            # ckmk_a_로 시작하는 파일명을 ckmk_d_로 변경
+            if wav_filename.startswith('ckmk_a_'):
+                label_filename = wav_filename.replace('ckmk_a_', 'ckmk_d_', 1) + '.json'
+            else:
+                print(f"WAV 파일명이 'ckmk_a_'로 시작하지 않음: {wav_filename}")
+                continue
+
+            # 라벨 파일 경로
+            label_source_file = label_source / label_filename
+
+            # 라벨 파일이 존재하는지 확인
+            if not label_source_file.exists():
+                print(f"라벨 파일이 존재하지 않음: {label_source_file}")
+                continue
+
+            # 대상 파일 경로
+            label_dest_file = label_output_path / label_filename
+
+            # 파일 복사
+            shutil.copy2(label_source_file, label_dest_file)
+            print(f"라벨 복사 완료: {label_filename}")
+            copied_count += 1
+
+        except Exception as e:
+            print(f"라벨 복사 실패 {wav_path}: {e}")
+
+    print(f"\n총 {copied_count}개 라벨 파일이 '{LABEL_OUTPUT_FOLDER}' 폴더로 복사되었습니다.")
+    return copied_count
+
 def main():
     # 명령줄 인수 확인
-    if len(sys.argv) != 2:
-        print("사용법: python VoiceAnalysis_Csv_Copybot.py <파일경로>")
+    if len(sys.argv) < 2 or len(sys.argv) > 3:
+        print("사용법: python VoiceAnalysis_Csv_Copybot.py <CSV파일경로> [라벨폴더경로]")
         print("예시: python VoiceAnalysis_Csv_Copybot.py data.csv")
-        print("예시: python VoiceAnalysis_Csv_Copybot.py comparison_results_250905/data.csv")
+        print("예시: python VoiceAnalysis_Csv_Copybot.py data.csv /path/to/label/folder")
         sys.exit(1)
 
     file_path = sys.argv[1]
+    label_source_path = sys.argv[2] if len(sys.argv) == 3 else None
 
     # 파일 존재 확인
     if not os.path.exists(file_path):
@@ -167,6 +234,12 @@ def main():
 
         # WAV 파일 복사
         copy_wav_files(low_score_files)
+
+        # 라벨 파일 복사
+        if label_source_path:
+            copy_label_files(low_score_files, label_source_path)
+        else:
+            print("라벨 폴더 경로가 제공되지 않아 라벨 파일 복사를 건너뜁니다.")
     else:
         print("조건에 해당하는 파일이 없습니다.")
 
