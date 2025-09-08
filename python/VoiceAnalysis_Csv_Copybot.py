@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 # 전역 변수
-OUTPUT_FOLDER = "summary_wav_f"
+OUTPUT_FOLDER = "parsed_wav_repo"
 REQUIRED_SCORE_COLUMNS = ['문자점수', '단어점수']
 FILE_COLUMN_NAME = '파일명'
 SCORE_THRESHOLD = 70
@@ -166,7 +166,7 @@ def main():
             print(f"{i}. {filename}")
 
         # WAV 파일 복사
-        # copy_wav_files(low_score_files)
+        copy_wav_files(low_score_files)
     else:
         print("조건에 해당하는 파일이 없습니다.")
 
