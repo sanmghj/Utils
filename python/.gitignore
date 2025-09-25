@@ -170,3 +170,7 @@ poetry.toml
 pyrightconfig.json
 
 comparison*
+mp4
+webm
+
+venv*
