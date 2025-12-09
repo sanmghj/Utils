@@ -174,3 +174,5 @@ mp4
 webm
 
 venv*
+
+validator_state.json
