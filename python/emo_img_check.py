@@ -96,7 +96,10 @@ class EmotionValidator:
     def _setup_result_area(self):
         """결과 및 컨트롤 영역"""
         with dpg.child_window(width=600, height=650, tag="result_area"):
-            dpg.add_text("Scores: waiting...", tag="score_text", wrap=580)
+            # ✅ Emotion Scores 타이틀 추가 (노란색)
+            dpg.add_text("Emotion Scores:", tag="score_title", color=[255, 255, 0])
+            dpg.add_text("waiting...", tag="score_text", wrap=580)
+            
             dpg.add_text("Result: -", tag="match_text", color=[255, 255, 255])
             dpg.add_text("Progress: 0/0 (0%)", tag="progress_text")
 
@@ -349,6 +352,7 @@ class EmotionValidator:
         # 필요한 컬럼 추가 및 정렬
         self._prepare_dataframe_columns()
         
+        # ✅ 타이틀은 그대로 두고 본문만 업데이트
         self._update_ui_message(
             "score_text",
             f"CSV loaded: {len(self.df)} rows\n{os.path.basename(path)}"
@@ -521,15 +525,19 @@ class EmotionValidator:
         max_emotion = Config.EMOTIONS[max_idx]
         max_score = scores[max_idx]
 
-        # 점수 표시
-        lines = [f"{e}: {s}" for e, s in zip(Config.EMOTIONS, scores)]
+        # ✅ 감정과 점수를 페어로 만들고 점수 높은 순으로 정렬
+        emotion_scores = list(zip(Config.EMOTIONS, scores))
+        emotion_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # ✅ 점수만 표시 (타이틀은 별도)
+        lines = [f"{e}: {s:.6f}" for e, s in emotion_scores]
         dpg.set_value("score_text", "\n".join(lines))
 
         # 매치 결과 표시
         is_match = max_emotion == self.selected_emotion
         self._show_match_result(max_emotion, max_score, is_match)
         
-        # ✅ match인 경우 자동 저장
+        # match인 경우 자동 저장
         if is_match:
             self._auto_save_match_result(row)
 
@@ -791,6 +799,7 @@ class EmotionValidator:
             "image_text",
             f"Restored: {len(self.image_files)} images"
         )
+        # ✅ 타이틀은 그대로 두고 본문만 업데이트
         self._update_ui_message(
             "score_text",
             f"CSV restored: {len(self.df)} rows\n"
