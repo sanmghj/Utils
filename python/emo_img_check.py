@@ -141,6 +141,94 @@ class EmotionValidator:
             dpg.add_button(label="Image Folder", width=180, height=40, callback=self.select_image_folder)
             dpg.add_button(label="CSV File", width=180, height=40, callback=self.select_csv)
         dpg.add_button(label="Start Analysis", width=370, height=40, callback=self.start_analysis)
+        
+        # ✅ Check 버튼 추가
+        dpg.add_separator()
+        dpg.add_button(label="Check Empty Results", width=370, height=40, callback=self.check_empty_results)
+        dpg.add_text("", tag="check_result_text", color=[255, 200, 100])
+        
+        # ✅ (1) 빈 결과 파일 리스트 (스크롤 가능한 창)
+        with dpg.child_window(height=150, tag="empty_files_window", show=False):
+            dpg.add_text("Click on a file to jump to it:", color=[255, 255, 100])
+
+    # ==================== CHECK EMPTY RESULTS ====================
+    def check_empty_results(self, *args):
+        """✅ cmp_result가 None인 항목 찾기 및 클릭 가능한 리스트 생성 (감정 점수가 모두 0인 경우 제외)"""
+        if self.df is None:
+            self._set_text("check_result_text", "Error: No CSV file loaded")
+            dpg.configure_item("empty_files_window", show=False)
+            return
+        
+        # cmp_result가 비어있거나 'nan'인 행 찾기
+        empty_mask = (self.df["cmp_result"].isna()) | (self.df["cmp_result"] == "") | (self.df["cmp_result"] == "nan")
+        empty_rows = self.df[empty_mask]
+        
+        # ✅ (1) 모든 감정 점수가 0인 행 제외
+        if not empty_rows.empty:
+            emotion_scores = empty_rows[Config.EMOTIONS]
+            # 각 행의 감정 점수 합계가 0보다 큰 행만 선택
+            non_zero_mask = emotion_scores.sum(axis=1) > 0
+            empty_rows = empty_rows[non_zero_mask]
+        
+        count = len(empty_rows)
+        
+        if count == 0:
+            self._set_text("check_result_text", "✓ All results filled! No empty cmp_result found.")
+            dpg.configure_item("empty_files_window", show=False)
+            return
+        
+        # ✅ 빈 항목 파일명 리스트 생성
+        empty_files = empty_rows["file_name"].tolist()
+        
+        self._set_text("check_result_text", f"⚠ Found {count} empty results (click to jump):")
+        
+        # ✅ 기존 버튼들 삭제 후 새로 생성
+        self._clear_empty_files_list()
+        
+        # ✅ 클릭 가능한 파일 버튼 생성
+        for file in empty_files:
+            full_filename = f"{Config.IMAGE_PREFIX}{file}"
+            dpg.add_button(
+                label=full_filename,
+                callback=self.jump_to_file,
+                user_data=full_filename,
+                width=350,
+                parent="empty_files_window"
+            )
+        
+        # 창 표시
+        dpg.configure_item("empty_files_window", show=True)
+        
+        print(f"Empty cmp_result count (excluding all-zero scores): {count}")
+        print(f"Files: {empty_files}")
+
+    def _clear_empty_files_list(self):
+        """✅ 빈 파일 리스트 초기화"""
+        if dpg.does_item_exist("empty_files_window"):
+            # 기존 자식 위젯들 삭제 (타이틀 제외)
+            children = dpg.get_item_children("empty_files_window", slot=1)
+            if children:
+                for child in children:
+                    if dpg.get_item_type(child) == "mvAppItemType::mvButton":
+                        dpg.delete_item(child)
+
+    def jump_to_file(self, sender, app_data, user_data):
+        """✅ (2) 특정 파일로 이동"""
+        target_filename = user_data
+        
+        if not self.image_files:
+            print(f"No image files loaded")
+            return
+        
+        # ✅ 파일 목록에서 찾기
+        if target_filename in self.image_files:
+            self.current_idx = self.image_files.index(target_filename)
+            self.load_image()
+            print(f"Jumped to: {target_filename} at index {self.current_idx}")
+            self._set_text("judgment_status", f"Jumped to: {target_filename}")
+        else:
+            print(f"File not found in current list: {target_filename}")
+            self._set_text("judgment_status", f"File not found: {target_filename}")
 
     # ==================== FILE DIALOGS ====================
     def select_image_folder(self, *args):
