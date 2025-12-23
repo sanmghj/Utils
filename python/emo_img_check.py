@@ -180,16 +180,16 @@ class EmotionValidator:
         
         # ✅ Check 버튼 추가
         dpg.add_separator()
-        dpg.add_button(label="Check Empty Results", width=370, height=40, callback=self.check_empty_results)
+        dpg.add_button(label="Check Results", width=370, height=40, callback=self.check_empty_results)
         dpg.add_text("", tag="check_result_text", color=[255, 200, 100])
         
         # ✅ (1) 빈 결과 파일 리스트 (스크롤 가능한 창)
         with dpg.child_window(height=150, tag="empty_files_window", show=False):
             dpg.add_text("Click on a file to jump to it:", color=[255, 255, 100])
 
-    # ==================== CHECK EMPTY RESULTS ====================
+    # ==================== CHECK RESULTS ====================
     def check_empty_results(self, *args):
-        """✅ cmp_result가 None인 항목 찾기 및 클릭 가능한 리스트 생성 (감정 점수가 모두 0인 경우 제외, 이미지 파일 존재 여부 확인)"""
+        """✅ 문제가 있는 항목 찾기: (1) cmp_result가 비어있는 경우 (2) cmp_result가 x인데 emotion이 비어있는 경우"""
         if self.df is None:
             self._set_text("check_result_text", "Error: No CSV file loaded")
             dpg.configure_item("empty_files_window", show=False)
@@ -200,20 +200,37 @@ class EmotionValidator:
             dpg.configure_item("empty_files_window", show=False)
             return
         
-        # cmp_result가 비어있거나 'nan'인 행 찾기
-        empty_mask = (self.df["cmp_result"].isna()) | (self.df["cmp_result"] == "") | (self.df["cmp_result"] == "nan")
-        empty_rows = self.df[empty_mask]
+        # ✅ 파일 목록 갱신 (mismatch 폴더 포함)
+        self._load_image_files()
         
-        # ✅ (1) 모든 감정 점수가 0인 행 제외
-        if not empty_rows.empty:
-            emotion_scores = empty_rows[Config.EMOTIONS]
+        # 문자열로 변환하고 공백 제거하여 정확한 비교
+        cmp_result_str = self.df["cmp_result"].astype(str).str.strip()
+        emotion_str = self.df["emotion"].astype(str).str.strip()
+        
+        # (1) cmp_result가 비어있거나 'nan'인 행 찾기
+        empty_cmp_mask = (cmp_result_str == "") | (cmp_result_str == "nan") | (cmp_result_str == "None")
+        empty_cmp_rows = self.df[empty_cmp_mask]
+        
+        # (2) cmp_result가 'x'인데 emotion이 비어있는 행 찾기
+        empty_emotion_mask = (
+            (cmp_result_str == "x") & 
+            ((emotion_str == "") | (emotion_str == "nan") | (emotion_str == "None"))
+        )
+        empty_emotion_rows = self.df[empty_emotion_mask]
+        
+        # 두 조건을 합침 (중복 제거)
+        problem_rows = pd.concat([empty_cmp_rows, empty_emotion_rows]).drop_duplicates()
+        
+        # ✅ 모든 감정 점수가 0인 행 제외
+        if not problem_rows.empty:
+            emotion_scores = problem_rows[Config.EMOTIONS]
             # 각 행의 감정 점수 합계가 0보다 큰 행만 선택
             non_zero_mask = emotion_scores.sum(axis=1) > 0
-            empty_rows = empty_rows[non_zero_mask]
+            problem_rows = problem_rows[non_zero_mask]
         
-        # ✅ 이미지 파일이 존재하는 항목만 필터링
+        # ✅ 이미지 파일이 존재하는 항목만 필터링 (current + mismatch)
         valid_files = []
-        for file in empty_rows["file_name"].tolist():
+        for file in problem_rows["file_name"].tolist():
             full_filename = f"{Config.IMAGE_PREFIX}{file}"
             img_path = Path(self.image_folder, full_filename)
             mismatch_path = Path(self.image_folder, Config.MISMATCH_FOLDER, full_filename)
@@ -222,14 +239,17 @@ class EmotionValidator:
             if img_path.exists() or mismatch_path.exists():
                 valid_files.append(file)
         
+        # ✅ 파일명 기준으로 정렬 (숫자 순서)
+        valid_files.sort(key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit() for c in x) else 0)
+        
         count = len(valid_files)
         
         if count == 0:
-            self._set_text("check_result_text", "✓ All results filled! No empty cmp_result found.")
+            self._set_text("check_result_text", "✓ All results are complete!")
             dpg.configure_item("empty_files_window", show=False)
             return
         
-        self._set_text("check_result_text", f"⚠ Found {count} empty results (click to jump):")
+        self._set_text("check_result_text", f"⚠ Found {count} incomplete results (click to jump):")
         
         # ✅ 기존 버튼들 삭제 후 새로 생성
         self._clear_empty_files_list()
@@ -247,9 +267,6 @@ class EmotionValidator:
         
         # 창 표시
         dpg.configure_item("empty_files_window", show=True)
-        
-        print(f"Empty cmp_result count (excluding all-zero scores and missing images): {count}")
-        print(f"Files: {valid_files}")
 
     def _clear_empty_files_list(self):
         """✅ 빈 파일 리스트 초기화"""
