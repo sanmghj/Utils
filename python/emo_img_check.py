@@ -18,6 +18,8 @@ from PIL import Image
 class Config:
     """설정 상수"""
     TEXTURE_SIZE = (500, 500)
+    CROPPED_TEXTURE_SIZE = (250, 250)  # cropped 이미지용 작은 크기
+    ORIGINAL_TEXTURE_SIZE = (250, 250)  # 원본 이미지용 작은 크기
     STATE_FILE = "validator_state.json"
     MISMATCH_FOLDER = "mismatch"
     IMAGE_PREFIX = "cropped_"
@@ -38,6 +40,8 @@ class EmotionValidator:
         self.selected_emotion: str = "neutral"
         self.user_judgment: Optional[str] = None
         self.texture_created = False
+        self.cropped_texture_created = False
+        self.original_texture_created = False
 
         self.setup_ui()
         self.load_state()
@@ -51,9 +55,21 @@ class EmotionValidator:
                 self._create_result_area()
 
     def _create_image_area(self):
-        """이미지 영역"""
+        """이미지 영역 - cropped와 원본 이미지 표시"""
         with dpg.child_window(width=550, height=650, tag="image_area"):
             dpg.add_text("Select image folder and CSV file, then click Start.", tag="image_text")
+            dpg.add_separator()
+            # cropped 이미지
+            with dpg.group(horizontal=False):
+                dpg.add_text("Cropped Image (Analyzed):", color=[255, 255, 0])
+                with dpg.child_window(width=530, height=270, tag="cropped_image_area"):
+                    pass
+            dpg.add_separator()
+            # 원본 이미지
+            with dpg.group(horizontal=False):
+                dpg.add_text("Original Image:", color=[100, 200, 255])
+                with dpg.child_window(width=530, height=270, tag="original_image_area"):
+                    pass
 
     def _create_result_area(self):
         """결과 영역"""
@@ -91,7 +107,7 @@ class EmotionValidator:
         )
 
     def _create_judgment_buttons(self):
-        """사용자 판별 버튼 (4x2 행렬)"""
+        """사용자 판별 버튼 (4x2 행렬 + Invalid Detection)"""
         with dpg.group(horizontal=True):
             dpg.add_text("User Judgment (for mismatches):", color=[255, 255, 0])
             dpg.add_text("", tag="judgment_status", color=[0, 255, 0])
@@ -118,6 +134,17 @@ class EmotionValidator:
                         callback=self.save_current_and_state
                     )
                     self._apply_save_button_theme(save_btn)
+        
+        # ✅ 3번째 줄: Invalid Detection 버튼
+        with dpg.group(horizontal=True):
+            invalid_btn = dpg.add_button(
+                label="Invalid Detection",
+                callback=self.on_user_judgment,
+                user_data="invalid",
+                width=560,
+                height=40
+            )
+            self._apply_invalid_button_theme(invalid_btn)
 
     def _apply_save_button_theme(self, btn):
         """Save 버튼 테마"""
@@ -126,6 +153,15 @@ class EmotionValidator:
                 dpg.add_theme_color(dpg.mvThemeCol_Button, (50, 100, 150, 255))
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (70, 120, 170, 255))
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (40, 90, 140, 255))
+        dpg.bind_item_theme(btn, theme)
+    
+    def _apply_invalid_button_theme(self, btn):
+        """Invalid Detection 버튼 테마 (빨간색)"""
+        with dpg.theme() as theme:
+            with dpg.theme_component(dpg.mvButton):
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (150, 30, 30, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (180, 50, 50, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (120, 20, 20, 255))
         dpg.bind_item_theme(btn, theme)
 
     def _create_nav_buttons(self):
@@ -153,9 +189,14 @@ class EmotionValidator:
 
     # ==================== CHECK EMPTY RESULTS ====================
     def check_empty_results(self, *args):
-        """✅ cmp_result가 None인 항목 찾기 및 클릭 가능한 리스트 생성 (감정 점수가 모두 0인 경우 제외)"""
+        """✅ cmp_result가 None인 항목 찾기 및 클릭 가능한 리스트 생성 (감정 점수가 모두 0인 경우 제외, 이미지 파일 존재 여부 확인)"""
         if self.df is None:
             self._set_text("check_result_text", "Error: No CSV file loaded")
+            dpg.configure_item("empty_files_window", show=False)
+            return
+        
+        if not self.image_folder:
+            self._set_text("check_result_text", "Error: No image folder selected")
             dpg.configure_item("empty_files_window", show=False)
             return
         
@@ -170,23 +211,31 @@ class EmotionValidator:
             non_zero_mask = emotion_scores.sum(axis=1) > 0
             empty_rows = empty_rows[non_zero_mask]
         
-        count = len(empty_rows)
+        # ✅ 이미지 파일이 존재하는 항목만 필터링
+        valid_files = []
+        for file in empty_rows["file_name"].tolist():
+            full_filename = f"{Config.IMAGE_PREFIX}{file}"
+            img_path = Path(self.image_folder, full_filename)
+            mismatch_path = Path(self.image_folder, Config.MISMATCH_FOLDER, full_filename)
+            
+            # 현재 폴더 또는 mismatch 폴더에 이미지가 존재하는지 확인
+            if img_path.exists() or mismatch_path.exists():
+                valid_files.append(file)
+        
+        count = len(valid_files)
         
         if count == 0:
             self._set_text("check_result_text", "✓ All results filled! No empty cmp_result found.")
             dpg.configure_item("empty_files_window", show=False)
             return
         
-        # ✅ 빈 항목 파일명 리스트 생성
-        empty_files = empty_rows["file_name"].tolist()
-        
         self._set_text("check_result_text", f"⚠ Found {count} empty results (click to jump):")
         
         # ✅ 기존 버튼들 삭제 후 새로 생성
         self._clear_empty_files_list()
         
-        # ✅ 클릭 가능한 파일 버튼 생성
-        for file in empty_files:
+        # ✅ 클릭 가능한 파일 버튼 생성 (이미지가 확인된 파일만)
+        for file in valid_files:
             full_filename = f"{Config.IMAGE_PREFIX}{file}"
             dpg.add_button(
                 label=full_filename,
@@ -199,8 +248,8 @@ class EmotionValidator:
         # 창 표시
         dpg.configure_item("empty_files_window", show=True)
         
-        print(f"Empty cmp_result count (excluding all-zero scores): {count}")
-        print(f"Files: {empty_files}")
+        print(f"Empty cmp_result count (excluding all-zero scores and missing images): {count}")
+        print(f"Files: {valid_files}")
 
     def _clear_empty_files_list(self):
         """✅ 빈 파일 리스트 초기화"""
@@ -361,7 +410,7 @@ class EmotionValidator:
         try:
             # ✅ 파일 위치 표시 (현재 폴더 or mismatch)
             location = "mismatch" if img_path.parent.name == Config.MISMATCH_FOLDER else "current"
-            self._display_image(str(img_path), f"{filename} [{location}]")
+            self._display_images(str(img_path), filename, location)
             self._display_scores(filename)
         except Exception as e:
             print(f"Error loading image: {e}")
@@ -369,26 +418,89 @@ class EmotionValidator:
 
         self._update_progress()
 
-    def _display_image(self, img_path: str, filename: str):
-        """이미지 표시"""
+    def _display_images(self, cropped_path: str, filename: str, location: str):
+        """cropped 이미지와 원본 이미지를 모두 표시"""
+        # 1. Cropped 이미지 표시
+        self._display_single_image(
+            cropped_path, 
+            Config.CROPPED_TEXTURE_SIZE,
+            "cropped_image_texture",
+            "cropped_image_display",
+            "cropped_image_area",
+            "cropped_texture_created"
+        )
+        
+        # 2. 원본 이미지 찾기 및 표시
+        base_name = filename.replace(Config.IMAGE_PREFIX, "")
+        original_path = self._find_original_image(base_name)
+        
+        if original_path:
+            self._display_single_image(
+                original_path,
+                Config.ORIGINAL_TEXTURE_SIZE,
+                "original_image_texture",
+                "original_image_display",
+                "original_image_area",
+                "original_texture_created"
+            )
+        else:
+            # 원본 이미지가 없으면 메시지 표시
+            if not self.original_texture_created:
+                dpg.add_text("Original image not found", parent="original_image_area", tag="original_not_found", color=[255, 100, 100])
+                self.original_texture_created = True
+            else:
+                if dpg.does_item_exist("original_not_found"):
+                    dpg.configure_item("original_not_found", show=True)
+                if dpg.does_item_exist("original_image_display"):
+                    dpg.configure_item("original_image_display", show=False)
+        
+        self._set_text("image_text", f"{filename} [{location}]")
+    
+    def _find_original_image(self, base_name: str) -> Optional[str]:
+        """cropped 이미지의 원본 파일 찾기 - CSV 파일이 있는 상위 폴더에서 찾기"""
+        if not self.csv_file:
+            return None
+        
+        # CSV 파일이 있는 폴더 (상위 폴더)
+        csv_folder = Path(self.csv_file).parent
+        
+        # 상위 폴더에서 원본 찾기
+        for ext in Config.IMAGE_EXTENSIONS:
+            original_path = Path(csv_folder, base_name)
+            if original_path.exists():
+                return str(original_path)
+            # 확장자가 다를 수 있으므로 여러 확장자 시도
+            original_with_ext = Path(csv_folder, f"{Path(base_name).stem}{ext}")
+            if original_with_ext.exists():
+                return str(original_with_ext)
+        
+        return None
+    
+    def _display_single_image(self, img_path: str, texture_size: tuple, texture_tag: str, 
+                             display_tag: str, parent_tag: str, created_flag: str):
+        """단일 이미지를 지정된 영역에 표시"""
         img = Image.open(img_path).convert("RGBA")
-        img.thumbnail(Config.TEXTURE_SIZE, Image.Resampling.LANCZOS)
+        img.thumbnail(texture_size, Image.Resampling.LANCZOS)
 
-        canvas = Image.new("RGBA", Config.TEXTURE_SIZE, (0, 0, 0, 255))
-        offset = ((Config.TEXTURE_SIZE[0] - img.width) // 2, (Config.TEXTURE_SIZE[1] - img.height) // 2)
+        canvas = Image.new("RGBA", texture_size, (0, 0, 0, 255))
+        offset = ((texture_size[0] - img.width) // 2, (texture_size[1] - img.height) // 2)
         canvas.paste(img, offset)
 
         data = (np.array(canvas, dtype=np.float32) / 255.0).flatten().tolist()
 
-        if not self.texture_created:
+        is_created = getattr(self, created_flag, False)
+        
+        if not is_created:
             with dpg.texture_registry(show=False):
-                dpg.add_dynamic_texture(*Config.TEXTURE_SIZE, default_value=data, tag="image_texture")
-            dpg.add_image("image_texture", parent="image_area", tag="image_display")
-            self.texture_created = True
+                dpg.add_dynamic_texture(*texture_size, default_value=data, tag=texture_tag)
+            dpg.add_image(texture_tag, parent=parent_tag, tag=display_tag)
+            setattr(self, created_flag, True)
         else:
-            dpg.set_value("image_texture", data)
-
-        self._set_text("image_text", filename)
+            dpg.set_value(texture_tag, data)
+            if dpg.does_item_exist(display_tag):
+                dpg.configure_item(display_tag, show=True)
+            if created_flag == "original_texture_created" and dpg.does_item_exist("original_not_found"):
+                dpg.configure_item("original_not_found", show=False)
 
     def _display_scores(self, filename: str):
         """점수 표시"""
@@ -579,8 +691,21 @@ class EmotionValidator:
             self._set_text("judgment_status", "Please select user judgment first")
             return
         
+        # ✅ (3) Invalid Detection - 잘못된 영역 감지
+        if self.user_judgment == "invalid":
+            result = "invalid"
+            self.df.at[idx, "cmp_result"] = str(result)
+            self.df.at[idx, "emotion"] = "invalid"
+            self._save_csv()
+            
+            print(f"Marked as invalid: {filename}")
+            self._set_text("judgment_status", "Saved as Invalid Detection!")
+            
+            # CSV 결과 표시 업데이트
+            self._set_text("csv_result_text", f"CSV Result: {result}\nCSV Emotion: invalid", [255, 100, 100])
+        
         # (2) user judgment가 target emotion과 동일 -> current 폴더로 이동
-        if self.user_judgment == self.selected_emotion:
+        elif self.user_judgment == self.selected_emotion:
             result = "O"
             self.df.at[idx, "cmp_result"] = str(result)
             self.df.at[idx, "emotion"] = str(self.user_judgment)
@@ -652,21 +777,32 @@ class EmotionValidator:
             return
 
         idx = row.index[0]
-        scores = self.df.loc[idx, Config.EMOTIONS].values
-        max_emotion = Config.EMOTIONS[int(np.argmax(scores))]
-        result = "O" if max_emotion == self.selected_emotion else "x"
-
-        # 결과 저장
-        self.df.at[idx, "cmp_result"] = str(result)
         
-        if self.user_judgment:
-            self.df.at[idx, "emotion"] = str(self.user_judgment)
+        # ✅ Invalid Detection 처리
+        if self.user_judgment == "invalid":
+            result = "invalid"
+            self.df.at[idx, "cmp_result"] = str(result)
+            self.df.at[idx, "emotion"] = "invalid"
+            self._save_csv()
+            
+            # CSV 결과 표시 업데이트
+            self._set_text("csv_result_text", f"CSV Result: {result}\nCSV Emotion: invalid", [255, 100, 100])
+        else:
+            scores = self.df.loc[idx, Config.EMOTIONS].values
+            max_emotion = Config.EMOTIONS[int(np.argmax(scores))]
+            result = "O" if max_emotion == self.selected_emotion else "x"
 
-        self._save_csv()
-        
-        # CSV 결과 표시 업데이트
-        emotion_display = str(self.user_judgment) if self.user_judgment else "(empty)"
-        self._set_text("csv_result_text", f"CSV Result: {result}\nCSV Emotion: {emotion_display}", [200, 200, 200])
+            # 결과 저장
+            self.df.at[idx, "cmp_result"] = str(result)
+            
+            if self.user_judgment:
+                self.df.at[idx, "emotion"] = str(self.user_judgment)
+
+            self._save_csv()
+            
+            # CSV 결과 표시 업데이트
+            emotion_display = str(self.user_judgment) if self.user_judgment else "(empty)"
+            self._set_text("csv_result_text", f"CSV Result: {result}\nCSV Emotion: {emotion_display}", [200, 200, 200])
         
         # ✅ mismatch로 이동 (현재 폴더에 있는 경우만)
         src = Path(self.image_folder, filename)
@@ -788,8 +924,11 @@ def main():
     with dpg.handler_registry():
         dpg.add_key_press_handler(dpg.mvKey_Left, callback=lambda s, a: validator.prev_image())
         dpg.add_key_press_handler(dpg.mvKey_Right, callback=lambda s, a: validator.next_image())
+        
         # ✅ (1) 's' 또는 'S' 키로 Save State 실행
         dpg.add_key_press_handler(dpg.mvKey_S, callback=lambda s, a: validator.save_current_and_state())
+        dpg.add_key_press_handler(dpg.mvKey_A, callback=lambda s, a: validator.prev_image())
+        dpg.add_key_press_handler(dpg.mvKey_D, callback=lambda s, a: validator.next_image())
 
     dpg.create_viewport(title="Emotion Validation Tool", width=1200, height=800)
     dpg.setup_dearpygui()
