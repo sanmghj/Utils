@@ -176,3 +176,5 @@ webm
 venv*
 
 validator_state.json
+
+/edf
