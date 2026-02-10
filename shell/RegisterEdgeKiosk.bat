@@ -12,12 +12,12 @@ set "TASK_NAME=EdgeKiosk"
 set "EDGE_PATH=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 
 :: ============ CONFIGURATION ============
-set "DMAPS_IP=192.168.0.100"
-set "DMAPS_USER=dmaps"
+set "URL=dmaps.emology.ai"
+set "USER=ned12"
 :: ========================================
 
-set "KIOSK_URL=http://%DMAPS_IP%/login"
-set "USER_DATA_DIR=C:\Users\%DMAPS_USER%\AppData\Local\Microsoft\Edge\User Data"
+set "KIOSK_URL=http://%URL%/login"
+set "USER_DATA_DIR=C:\Users\%USER%\AppData\Local\Microsoft\Edge\User Data"
 set "PROFILE_DIR=Default"
 set "KIOSK_ARGS=--kiosk "%KIOSK_URL%" --edge-kiosk-type=fullscreen --user-data-dir="%USER_DATA_DIR%" --profile-directory="%PROFILE_DIR%""
 
@@ -84,7 +84,7 @@ if %errorlevel%==0 (
   echo   Profile: %USER_DATA_DIR%\%PROFILE_DIR%
   echo   User: %CURRENT_USER%
   echo.
-  echo To change settings, edit DMAPS_IP and DMAPS_USER in this script.
+  echo To change settings, edit URL and USER in this script.
 ) else (
   echo Failed to register task.
 )
