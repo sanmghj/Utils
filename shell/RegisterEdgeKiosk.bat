@@ -13,7 +13,7 @@ set "EDGE_PATH=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 
 :: ============ CONFIGURATION ============
 set "URL=dmaps.emology.ai"
-set "USER=ned12"
+set "USER=admin"
 :: ========================================
 
 set "KIOSK_URL=http://%URL%/login"
